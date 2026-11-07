@@ -1,0 +1,2 @@
+GitHub repository link: https://github.com/<your-username>/Terraform_Snehal
+(Replace the placeholder above and in README.md after you push this folder to GitHub.)

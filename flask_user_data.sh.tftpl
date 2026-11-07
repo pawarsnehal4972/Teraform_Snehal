@@ -1,0 +1,39 @@
+#!/bin/bash
+# Part 2 user-data: Flask backend instance (port ${flask_port}).
+set -euxo pipefail
+exec > >(tee /var/log/user-data.log) 2>&1
+
+echo "=== Installing Python ==="
+dnf install -y python3 python3-pip
+
+echo "=== Deploying Flask backend ==="
+mkdir -p /opt/flask-backend
+echo '${flask_app_b64}' | base64 -d > /opt/flask-backend/app.py
+echo '${flask_requirements_b64}' | base64 -d > /opt/flask-backend/requirements.txt
+python3 -m venv /opt/flask-backend/venv
+/opt/flask-backend/venv/bin/pip install --no-cache-dir -r /opt/flask-backend/requirements.txt
+chown -R ec2-user:ec2-user /opt/flask-backend
+
+cat > /etc/systemd/system/flask-backend.service <<'UNIT'
+[Unit]
+Description=Flask backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/flask-backend
+Environment=PORT=${flask_port}
+ExecStart=/opt/flask-backend/venv/bin/gunicorn --bind 0.0.0.0:${flask_port} --workers 2 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now flask-backend.service
+
+sleep 5
+curl -s http://localhost:${flask_port}/api/health || true
+echo "=== Done ==="

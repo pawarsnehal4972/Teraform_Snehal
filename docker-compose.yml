@@ -1,0 +1,12 @@
+# Optional: test both containers locally before pushing to ECR.
+#   docker compose up --build   ->  http://localhost:3000
+services:
+  flask:
+    build: ./flask-backend
+    ports: ["5000:5000"]
+  express:
+    build: ./express-frontend
+    environment:
+      BACKEND_URL: http://flask:5000
+    ports: ["3000:3000"]
+    depends_on: [flask]

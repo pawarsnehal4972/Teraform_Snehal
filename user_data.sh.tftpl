@@ -1,0 +1,67 @@
+#!/bin/bash
+# Part 1 user-data: Flask (port ${flask_port}) + Express (port ${express_port}) on ONE instance.
+set -euxo pipefail
+exec > >(tee /var/log/user-data.log) 2>&1
+
+echo "=== Installing Python and Node.js ==="
+dnf install -y python3 python3-pip
+dnf install -y nodejs nodejs-npm || dnf install -y nodejs20 nodejs20-npm
+
+echo "=== Deploying Flask backend ==="
+mkdir -p /opt/flask-backend /opt/express-frontend
+echo '${flask_app_b64}' | base64 -d > /opt/flask-backend/app.py
+echo '${flask_requirements_b64}' | base64 -d > /opt/flask-backend/requirements.txt
+python3 -m venv /opt/flask-backend/venv
+/opt/flask-backend/venv/bin/pip install --no-cache-dir -r /opt/flask-backend/requirements.txt
+
+echo "=== Deploying Express frontend ==="
+echo '${express_server_b64}' | base64 -d > /opt/express-frontend/server.js
+echo '${express_package_b64}' | base64 -d > /opt/express-frontend/package.json
+cd /opt/express-frontend
+npm install --omit=dev
+
+chown -R ec2-user:ec2-user /opt/flask-backend /opt/express-frontend
+
+echo "=== Creating systemd services ==="
+cat > /etc/systemd/system/flask-backend.service <<'UNIT'
+[Unit]
+Description=Flask backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/flask-backend
+Environment=PORT=${flask_port}
+ExecStart=/opt/flask-backend/venv/bin/gunicorn --bind 0.0.0.0:${flask_port} --workers 2 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/express-frontend.service <<'UNIT'
+[Unit]
+Description=Express frontend
+After=network-online.target flask-backend.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/express-frontend
+Environment=PORT=${express_port}
+Environment=BACKEND_URL=http://127.0.0.1:${flask_port}
+ExecStart=/usr/bin/node server.js
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now flask-backend.service express-frontend.service
+
+sleep 5
+curl -s http://localhost:${flask_port}/api/health || true
+curl -s http://localhost:${express_port}/health || true
+echo "=== Done ==="
